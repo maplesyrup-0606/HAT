@@ -161,3 +161,8 @@ cython_debug/
 
 # Emacs temp files
 *~
+
+*.tmp
+checkpoints
+*.jpg 
+pretrained_models

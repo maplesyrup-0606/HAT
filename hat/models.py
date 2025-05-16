@@ -283,8 +283,10 @@ class ImageFeatureEncoder(nn.Module):
                                 map_location=torch.device('cpu'))
         bb_weights_new = bb_weights.copy()
         for k, v in bb_weights.items():
-            if k[:3] == 'res':
-                bb_weights_new["stages." + k] = v
+            if k.startswith("stages."):
+                new_k = k.replace("stages.", "")
+                bb_weights_new[new_k] = v
+                # bb_weights_new["stages." + k] = v
                 bb_weights_new.pop(k)
         self.backbone.load_state_dict(bb_weights_new)
         self.backbone.eval()
