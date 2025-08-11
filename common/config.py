@@ -30,7 +30,7 @@ class JsonConfig(dict):
         if isinstance(arg, str):
             super().__setitem__("__name",
                                 os.path.splitext(os.path.basename(arg))[0])
-            with open(arg, "r") as load_f:
+            with open(os.path.expanduser(arg), "r") as load_f:
                 arg = json.load(load_f)
         if isinstance(arg, dict):
             # case 1: init from dict

@@ -1,3 +1,5 @@
+from tqdm import tqdm
+from pathlib import Path
 import torch
 import numpy as np
 import matplotlib.pyplot as plt
@@ -48,6 +50,7 @@ def plot_scanpath(img, xs, ys, bbox=None, title=None, save_dir=None):
         ax.set_title(title)
     plt.show()
     plt.savefig(save_dir, dpi=dpi, bbox_inches='tight', pad_inches=0)
+    plt.close()
     
 def actions2scanpaths(norm_fixs, im_h, im_w):
     # convert actions to scanpaths
@@ -61,12 +64,15 @@ def actions2scanpaths(norm_fixs, im_h, im_w):
     return scanpaths
 
 def main() :
-    img_dir = sys.argv[1]
-    save_dir = sys.argv[2]
-    img_save_dir = sys.argv[3]
+    img_root = Path(sys.argv[1]).expanduser()
+    scan_root = Path(sys.argv[2]).expanduser()
+    vis_root = Path(sys.argv[3]).expanduser()
+    
+    print("Image from:", img_root)
+    print("Saving to:", scan_root, vis_root)
 
-    print("Image from:", img_dir)
-    print("Saving to:", save_dir)
+    all_imgs = list(img_root.rglob('*.jpg'))          # materialises the list
+    n_imgs   = len(all_imgs)
 
     # choose configs
     TAP = 'FV' # ["TP", "TA", "FV"]
@@ -132,13 +138,13 @@ def main() :
     # load checkpoint
     # before proceed, please make sure to download checkpionts from http://vision.cs.stonybrook.edu/~cvlab_download/HAT/
 
-    checkpoint_pahts = {
+    checkpoint_paths = {
         'TP': "./checkpoints/HAT_TP.pt", # target present
         'TA': "./checkpoints/HAT_TA.pt", # target absent
         'FV': "./checkpoints/HAT_FV.pt" # free viewing
     }
 
-    ckpt = torch.load(checkpoint_pahts[hparams.Data.TAP], map_location='cpu')
+    ckpt = torch.load(checkpoint_paths[hparams.Data.TAP], map_location='cpu')
     bb_weights = ckpt['model']
     bb_weights_new = bb_weights.copy()
     for k, v in bb_weights.items() :
@@ -149,45 +155,58 @@ def main() :
 
     model.load_state_dict(bb_weights_new)
 
-    # load test image
-    orig_img = Image.open(img_dir)
+    with torch.no_grad(): 
+        for img_path in tqdm(img_root.rglob('*.jpg'), total=n_imgs): 
+            rel = img_path.relative_to(img_root)
+            stem = rel.with_suffix('')
+            save_dir = scan_root / f'{stem}_scanpath.npy'
+            img_save_dir = vis_root / f'{stem}_output.jpg'
+            save_dir.parent.mkdir(parents=True, exist_ok=True)
+            img_save_dir.parent.mkdir(parents=True, exist_ok=True)
 
-    original_resolution = orig_img.size
-    X_ratio = original_resolution[0] / 512 
-    Y_ratio = original_resolution[1] / 320 
+            
 
-    img = orig_img.resize((512, 320))
+            # load test image
+            orig_img = Image.open(img_path).convert("RGB")
+            
 
-    plt.imshow(orig_img)
-    plt.axis('off')
+            original_resolution = orig_img.size
+            X_ratio = original_resolution[0] / 512 
+            Y_ratio = original_resolution[1] / 320 
 
-    # preprocess
-    size = (hparams.Data.im_h, hparams.Data.im_w)
-    transform = transforms.Compose([
-        transforms.Resize(size=size),
-        transforms.ToTensor(),
-        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
-    ])
+            img = orig_img.resize((512, 320))
+            
+            plt.imshow(orig_img)
+            plt.axis('off')
 
-    img_tensor = torch.unsqueeze(transform(img), 0)
+            # preprocess
+            size = (hparams.Data.im_h, hparams.Data.im_w)
+            transform = transforms.Compose([
+                transforms.Resize(size=size),
+                transforms.ToTensor(),
+                transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+            ])
 
-    # Load preset task name and ids
-    preset_tasks = np.load("./demo/all_task_ids.npy", allow_pickle=True).item()
+            img_tensor = torch.unsqueeze(transform(img), 0)
 
-    task = 'bottle'
-    sample_action = False
-    if task in preset_tasks and TAP != 'FV':
-        task_id = torch.tensor([preset_tasks[task]], dtype=torch.long)
-    else:
-        task_id = torch.tensor([0], dtype=torch.long)
-    normalized_sp, _ = scanpath_decode(model, img_tensor, task_id, hparams.Data, sample_action=sample_action, center_initial=True)
-    scanpath = actions2scanpaths(normalized_sp, hparams.Data.im_h, hparams.Data.im_w)[0]
-    
-    scanpath['X'] = scanpath['X'] * X_ratio
-    scanpath['Y'] = scanpath['Y'] * Y_ratio
+            # Load preset task name and ids
+            preset_tasks = np.load("./demo/all_task_ids.npy", allow_pickle=True).item()
 
-    plot_scanpath(orig_img, scanpath['X'], scanpath['Y'], save_dir=img_save_dir)
-    np.save(save_dir, scanpath)
+            task = 'bottle'
+            sample_action = False
+            if task in preset_tasks and TAP != 'FV':
+                task_id = torch.tensor([preset_tasks[task]], dtype=torch.long)
+            else:
+                task_id = torch.tensor([0], dtype=torch.long)
+            normalized_sp, _ = scanpath_decode(model, img_tensor, task_id, hparams.Data, sample_action=sample_action, center_initial=True)
+            scanpath = actions2scanpaths(normalized_sp, hparams.Data.im_h, hparams.Data.im_w)[0]
+            
+            scanpath['X'] = scanpath['X'] * X_ratio
+            scanpath['Y'] = scanpath['Y'] * Y_ratio
+
+            plot_scanpath(orig_img, scanpath['X'], scanpath['Y'], save_dir=img_save_dir)
+            np.save(save_dir, scanpath)
+            print("Saved!")
 
 
 if __name__ == "__main__" :
